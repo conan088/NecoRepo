@@ -1,0 +1,749 @@
+<!-- 谷歌地图选择，使用web-view内嵌显示 -->
+<!DOCTYPE html>
+<!-- uni 的 SDK -->
+<script type="text/javascript" src="./uni.webview.1.5.6.js"></script>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+		<title>谷歌地图搜索</title>
+		<style>
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
+
+			body,
+			html {
+				height: 100%;
+				font-family: Arial, sans-serif;
+			}
+
+			.container {
+				height: 100%;
+				display: flex;
+				flex-direction: column;
+			}
+
+			.header {
+				background: #fff;
+				padding: 10px;
+				box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+				z-index: 100;
+				padding-top: 50px;
+				display: none;
+			}
+
+			.search-container {
+				display: flex;
+				align-items: center;
+				margin-bottom: 10px;
+			}
+			.search-back {
+				font-size: 20px;
+				padding-right: 10px;
+			}
+			.search-input {
+				flex: 1;
+				padding: 10px;
+				border: 1px solid #ddd;
+				border-radius: 4px 0 0 4px;
+				font-size: 14px;
+			}
+
+			.search-btn {
+				padding: 10px 15px;
+				background: #4285f4;
+				color: white;
+				border: none;
+				border-radius: 0 4px 4px 0;
+				cursor: pointer;
+			}
+
+			.tabs {
+				display: flex;
+				border-bottom: 1px solid #eee;
+			}
+
+			.tab {
+				flex: 1;
+				text-align: center;
+				padding: 10px;
+				cursor: pointer;
+				background: #f5f5f5;
+			}
+
+			.tab.active {
+				background: #4285f4;
+				color: white;
+			}
+
+			.map-container {
+				flex: 1;
+				position: relative;
+			}
+
+			#map {
+				width: 100%;
+				height: 100%;
+			}
+
+			.results-panel {
+				/* position: absolute;
+				top: 10px;
+				left: 1vw;
+				width: 98vw; */
+				height: 40vh;
+				background: white;
+				border-radius: 4px;
+				box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+				z-index: 99;
+				overflow-y: auto;
+				display: none;
+			}
+
+			.result-item {
+				padding: 15px;
+				border-bottom: 1px solid #eee;
+				cursor: pointer;
+			}
+
+			.result-item:hover {
+				background: #f5f5f5;
+			}
+
+			.result-name {
+				font-weight: bold;
+				margin-bottom: 5px;
+			}
+
+			.result-address {
+				font-size: 12px;
+				color: #666;
+				margin-bottom: 5px;
+			}
+
+			.result-rating {
+				font-size: 12px;
+				color: #f57c00;
+			}
+
+			.close-btn {
+				padding: 5px;
+				position: absolute;
+				top: 5px;
+				right: 5px;
+				background: none;
+				border: none;
+				font-size: 18px;
+				cursor: pointer;
+			}
+
+			.current-location-btn {
+				position: absolute;
+				bottom: 25px;
+				right: 10px;
+				background: white;
+				border: 1px solid #ccc;
+				border-radius: 4px;
+				padding: 10px;
+				cursor: pointer;
+				box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+				z-index: 99;
+			}
+
+			.loading {
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+				background: rgba(0, 0, 0, 0.7);
+				color: white;
+				padding: 10px 20px;
+				border-radius: 4px;
+				z-index: 100;
+				display: none;
+			}
+			
+			.route-info {
+				position: relative;
+			}
+			.route-summary {
+				/* position: absolute;
+				left: 0;
+				top: 0; */
+				font-size: 14px;
+				color: #000;
+				padding: 2px 10px;
+				border-radius: 20px;
+				background: #fff;
+				font-weight: 400;
+			}
+			
+			/* 自定义Marker label样式 */
+			.custom-marker-label {
+			  background-color: #fff;
+			  border-radius: 20px;
+			  padding: 4px 8px;
+			  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+				margin: -10px 0 0 80px;
+			}
+			
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="header" id="header">
+				<div class="search-container">
+					<div id="searchBack" class="search-back"><</div>
+					<input type="text" id="searchInput" class="search-input" placeholder="搜索地点...">
+					<button id="searchBtn" class="search-btn">搜索</button>
+				</div>
+				<!-- <div class="tabs">
+					<div class="tab active" data-type="nearby">附近搜索</div>
+					<div class="tab" data-type="text">文本搜索</div>
+				</div> -->
+			</div>
+
+			<div class="map-container">
+				<div id="map"></div>
+				<div class="loading" id="loading">搜索中...</div>
+				<button class="current-location-btn" id="currentLocationBtn">📍</button>
+
+			</div>
+			<div class="results-panel" id="resultsPanel">
+				<button class="close-btn" id="closeResults">×</button>
+				<div id="resultsList"></div>
+			</div>
+		</div>
+
+		<script>
+			let map, placesManager, directionsManager, directionsRenderer, currentLocation, markers = [], mapTypeLibraries;
+			// 终点经纬度
+			let destinationObj = {}
+			// 初始化地图
+			function initMap() {
+				map = new google.maps.Map(document.getElementById('map'), {
+					center: {
+						lat: 39.9042,
+						lng: 116.4074
+					},
+					zoom: 15,
+					// 街景小人控件
+					streetViewControl: false,
+					// 地图类型控件
+					mapTypeControl: false,
+					// 全屏模式打开地图的控件
+					fullscreenControl: false,
+				});
+				placesManager = new google.maps.places.PlacesService(map);
+				sendMessageToApp({
+					action: 'loading'
+				})
+				// 获取当前位置
+				getCurrentLocation();
+				// 绑定事件
+				bindEvents();
+				// 搜索
+				if (mapTypeLibraries === 'places') {
+					document.getElementById('header').style.display = 'block';
+				}
+				
+				
+				// directionsManager = new google.maps.DirectionsService();
+				// directionsRenderer = new google.maps.DirectionsRenderer({
+				// 	map: map,
+				// 	suppressMarkers: false,
+				// 	polylineOptions: {
+				// 		strokeColor: '#0066CC',
+				// 		strokeWeight: 5
+				// 	}
+				// })
+				if (mapTypeLibraries === 'directions') {
+					// 路程规划
+					// directionsManager = new google.maps.directions.DirectionsService(map);
+					// directionsRenderer = new google.maps.directions.DirectionsRenderer({
+					// 	map: map,
+					// 	suppressMarkers: false,
+					// 	polylineOptions: {
+					// 		strokeColor: '#0066CC',
+					// 		strokeWeight: 5
+					// 	}
+					// })
+					// setTimeout(function() {
+					// 	planRoute()
+					// },2000)
+				}
+				
+			}
+
+			// 绑定事件
+			function bindEvents() {
+				document.getElementById('searchBack').addEventListener('click', onSearchBack);
+				document.getElementById('searchBtn').addEventListener('click', performSearch);
+				document.getElementById('searchInput').addEventListener('keypress', function(e) {
+					if (e.key === 'Enter') {
+						performSearch();
+					}
+				});
+
+				document.getElementById('currentLocationBtn').addEventListener('click', getCurrentLocation);
+				document.getElementById('closeResults').addEventListener('click', function() {
+					document.getElementById('resultsPanel').style.display = 'none';
+				});
+
+				// 标签切换
+				document.querySelectorAll('.tab').forEach(tab => {
+					tab.addEventListener('click', function() {
+						document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+						this.classList.add('active');
+					});
+				});
+			}
+
+			// 获取当前位置
+			function getCurrentLocation() {
+				showLoading(true);
+
+				if (navigator.geolocation) {
+					navigator.geolocation.getCurrentPosition(
+						position => {
+							currentLocation = {
+								lat: position.coords.latitude,
+								lng: position.coords.longitude
+							};
+							let label = {}
+							if (mapTypeLibraries === 'directions') {
+								let contLocation = calculateCenterPoint(currentLocation.lat, currentLocation.lng,destinationObj.lat,destinationObj.lng)
+								map.setCenter(contLocation);
+								label = {
+									text: '起点',
+									color: '#000',
+									fontSize: '14px',
+									className: 'custom-marker-label'
+								}
+								// 终点
+								const destination = new google.maps.Marker({
+									position: destinationObj,
+									map: map,
+									title: '终点',
+									icon: '../imgs/group-from.png',
+									label: {
+										text: '终点',
+										color: '#000',
+										fontSize: '14px',
+										className: 'custom-marker-label'
+									}
+								});
+								
+								// 直线路线
+								drawRouteLine(currentLocation, destinationObj)
+							} else {
+								map.setCenter(currentLocation);
+							}
+							
+							// 添加当前位置标记
+							const marker = new google.maps.Marker({
+								position: currentLocation,
+								map: map,
+								title: '当前位置',
+								icon: '../imgs/group-go.png',
+								label,
+							});
+
+							showLoading(false);
+							
+							if (mapTypeLibraries === 'places') {
+								// 如果输入框为空，自动搜索附近的地点
+								if (!document.getElementById('searchInput').value.trim()) {
+									searchNearbyPlaces('');
+								}
+							}
+							
+						},
+						error => {
+							console.error('获取位置失败:', error);
+							showLoading(false);
+						}
+					);
+				} else {
+					showLoading(false);
+				}
+			}
+			
+			// 返回上一页
+			function onSearchBack() {
+				uni.navigateBack()
+			}
+
+			// 执行搜索
+			function performSearch() {
+				const query = document.getElementById('searchInput').value.trim();
+				// const searchType = document.querySelector('.tab.active').dataset.type;
+
+				if (!query) {
+					alert('请输入搜索关键词');
+					return;
+				}
+
+				// if (searchType === 'nearby') {
+				// 	searchNearbyPlaces(query);
+				// } else {
+				// 	searchTextPlaces(query);
+				// }
+				searchTextPlaces(query);
+			}
+
+			// 附近搜索
+			function searchNearbyPlaces(keyword) {
+				if (!currentLocation) {
+					alert('请先获取当前位置');
+					return;
+				}
+
+				showLoading(true);
+
+				const request = {
+					location: currentLocation,
+					radius: 1000, // 1公里范围
+					keyword: keyword,
+					types: ['restaurant'],
+				};
+
+				placesManager.nearbySearch(request, (results, status) => {
+					showLoading(false);
+
+					if (status === google.maps.places.PlacesServiceStatus.OK) {
+						displayResults(results);
+						displayPlacesOnMap(results);
+					} else {
+						alert('搜索失败: ' + status);
+					}
+				});
+			}
+
+			// 文本搜索
+			function searchTextPlaces(query) {
+				showLoading(true);
+
+				const request = {
+					query: query,
+					...(currentLocation ? {
+						location: currentLocation,
+						radius: 5000
+					} : {})
+				};
+
+				placesManager.textSearch(request, (results, status) => {
+					showLoading(false);
+
+					if (status === google.maps.places.PlacesServiceStatus.OK) {
+						displayResults(results, query);
+						displayPlacesOnMap(results);
+					} else {
+						alert('搜索失败: ' + status);
+					}
+				});
+			}
+
+			// 显示搜索结果
+			function displayResults(results, query) {
+				const resultsList = document.getElementById('resultsList');
+				resultsList.innerHTML = '';
+				
+				// 中心点
+				if (query) {
+					map.setCenter(results[0].geometry.location);
+					map.setZoom(17);
+				}
+				
+				
+				let nearbyList = results.map(item => {
+					
+					const distance = calculateHaversineDistance(
+							currentLocation.lat,
+							currentLocation.lng,
+							item.geometry.location.lat(),
+							item.geometry.location.lng()
+					);
+					return {
+						...item,
+						distance,
+						address: item.vicinity,
+						lat: item.geometry.location.lat(),
+						lng: item.geometry.location.lng(),
+					};
+				}).sort((a, b) => a.distance - b.distance)
+				nearbyList = nearbyList.map(item => {
+					return {
+						...item,
+						distance: item.distance > 1 ? `${item.distance.toFixed(2)}km` : item.distance ? `${parseInt(item.distance*1000)}m` : '',
+					}
+				})
+
+				nearbyList.forEach((place, index) => {
+					const item = document.createElement('div');
+					item.className = 'result-item';
+					item.innerHTML = `
+                    <div class="result-name">${place.name}</div>
+                    <div class="result-address">${place.vicinity || place.formatted_address || ''}</div>
+                    <div class="result-rating">
+                        距离: ${place.distance} 
+                        
+                    </div>
+                `;
+
+					item.addEventListener('click', () => {
+						console.log('详情信息', place)
+						// 点击结果项，在地图上居中显示
+						if (place.geometry && place.geometry.location) {
+							map.setCenter(place.geometry.location);
+							map.setZoom(17);
+							sendMessageToApp({
+								action: 'info',
+								info: place
+							})
+						}
+					});
+
+					resultsList.appendChild(item);
+				});
+
+				document.getElementById('resultsPanel').style.display = 'block';
+			}
+
+			// 在地图上显示地点
+			function displayPlacesOnMap(places) {
+				// 清除之前标记
+				clearMarkers();
+
+				places.forEach(place => {
+					if (!place.geometry || !place.geometry.location) return;
+
+					const marker = new google.maps.Marker({
+						position: place.geometry.location,
+						map: map,
+						title: place.name,
+						icon: '../imgs/group-from.png',
+					});
+
+					// 添加信息窗口
+					const infoWindow = new google.maps.InfoWindow({
+						headerContent: `${place.name}`,
+						content: `<div>
+												<p style="margin: 0 0 5px 0; font-size: 12px;">${place.vicinity || place.formatted_address || ''}</p>
+												<p style="margin: 0; font-size: 12px;">评分: ${place.rating || '暂无'} (${place.user_ratings_total || 0}条评论)</p>
+										</div>`
+					});
+
+					marker.addListener('click', () => {
+						infoWindow.open(map, marker);
+					});
+
+					markers.push(marker);
+				});
+			}
+
+			// 清除标记
+			function clearMarkers() {
+				markers.forEach(marker => marker.setMap(null));
+				markers = [];
+			}
+
+			// 显示/隐藏加载状态
+			function showLoading(show) {
+				document.getElementById('loading').style.display = show ? 'block' : 'none';
+			}
+
+			// 从APP接收API密钥
+			function setApiKey(apiKey, language, region, libraries, destination) {
+				mapTypeLibraries = libraries
+				destinationObj = destination || {}
+				if (apiKey) {
+					window.GOOGLE_MAPS_API_KEY = apiKey;
+					// 重新加载地图API
+					const script = document.createElement('script');
+					script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initMap&language=${language}&region=${region}`;
+					script.async = true;
+					script.defer = true;
+					document.head.appendChild(script);
+				}
+			}
+
+			// 接收来自APP的消息
+			window.addEventListener('message', function(event) {
+				console.log('接收来自APP的消息')
+				const data = event.data;
+				if (data.action === 'setApiKey') {
+					setApiKey(data.apiKey);
+				} else if (data.action === 'search') {
+					document.getElementById('searchInput').value = data.query || '';
+					performSearch();
+				} else if (data.action === 'setLocation') {
+					currentLocation = {
+						lat: data.lat,
+						lng: data.lng
+					};
+					map.setCenter(currentLocation);
+				}
+			});
+
+			// html发送给web-view
+			function sendMessageToApp(data) {
+				try {
+					// #ifdef H5
+					if (window.MapIsH5) {
+						window.documentPictureInPicture.setGoogleInfo(data)
+						return true;
+					}
+					
+					// #endif
+					// 方法1: 使用uni.postMessage (推荐)
+					if (typeof uni !== 'undefined') {
+						uni.postMessage({
+							data: data
+						});
+						
+						return true;
+					}
+
+					// 方法2: 使用postMessage (兼容旧版本)
+					if (window.parent && window.parent !== window) {
+						window.parent.postMessage(data, '*');
+						return true;
+					}
+
+					// 方法3: 使用Android特定接口
+					if (window.Android && typeof window.Android.postMessage === 'function') {
+						window.Android.postMessage(JSON.stringify(data));
+						return true;
+					}
+
+					return false;
+				} catch (error) {
+					return false;
+				}
+			}
+			
+			
+			
+			// 规划路线
+			function planRoute() {
+				// if (!this.origin || !this.destination) {
+				// 	uni.showToast({
+				// 		title: '请输入起点和终点',
+				// 		icon: 'none'
+				// 	})
+				// 	return
+				// }
+				
+				const request = {
+					origin: '八月花',
+					destination: '珠江酒家',
+					// waypoints: [],
+					travelMode: google.maps.TravelMode.DRIVING,
+					optimizeWaypoints: true
+				}
+				
+				directionsService.route(request, (result, status) => {
+					if (status === 'OK') {
+						directionsRenderer.setDirections(result)
+						displayRouteInfo(result)
+					} else {
+						// uni.showToast({
+						// 	title: '路线规划失败: ' + status,
+						// 	icon: 'none'
+						// })
+						console.log('失败')
+					}
+				})
+			}
+			
+			// 显示路线信息
+			function displayRouteInfo(result) {
+				const route = result.routes[0]
+				const summaryPanel = document.createElement('div')
+				summaryPanel.className = 'route-info'
+				
+				// 计算总距离和时间
+				let totalDistance = 0
+				let totalDuration = 0
+				
+				for (let i = 0; i < route.legs.length; i++) {
+					totalDistance += route.legs[i].distance.value
+					totalDuration += route.legs[i].duration.value
+				}
+				
+				const distanceInKm = (totalDistance / 1000).toFixed(2)
+				const durationInMin = Math.round(totalDuration / 60)
+				
+				summaryPanel.innerHTML = `
+					<div class="route-summary">
+						<h3>行程信息</h3>
+						<p>总距离: ${distanceInKm} 公里</p>
+						<p>预计时间: ${durationInMin} 分钟</p>
+					</div>
+				`
+				
+				// 将信息面板添加到地图上
+				map.controls[google.maps.ControlPosition.TOP_CENTER].push(summaryPanel)
+			}
+			
+			// 绘制两点之间的路线线
+			function drawRouteLine(start, end) {
+				const routePath = new google.maps.Polyline({
+					path: [start, end],
+					geodesic: true,
+					strokeColor: '#FF0000',
+					strokeOpacity: 1.0,
+					strokeWeight: 2
+				});
+				
+				routePath.setMap(map);
+			}
+			
+			// 计算距离
+			function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+					const R = 6371; // 地球半径，单位：千米
+					const dLat = (lat2 - lat1) * (Math.PI / 180);
+					const dLon = (lon2 - lon1) * (Math.PI / 180);
+					const a =
+							Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+							Math.cos(lat1 * (Math.PI / 180)) *
+							Math.cos(lat2 * (Math.PI / 180)) *
+							Math.sin(dLon / 2) * Math.sin(dLon / 2);
+					const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+					return R * c;
+			}
+			
+			// 计算两个经纬度坐标之间的中心点
+			function calculateCenterPoint(lat1, lng1, lat2, lng2) {
+			  // 将角度转换为弧度
+			  const toRadians = (degrees) => degrees * (Math.PI / 180);
+			  // 将弧度转换为角度
+			  const toDegrees = (radians) => radians * (180 / Math.PI);
+			  
+			  const radLat1 = toRadians(lat1);
+			  const radLat2 = toRadians(lat2);
+			  const deltaLng = toRadians(lng2 - lng1);
+			  
+			  const bx = Math.cos(radLat2) * Math.cos(deltaLng);
+			  const by = Math.cos(radLat2) * Math.sin(deltaLng);
+			  
+			  const centerLat = Math.atan2(
+			    Math.sin(radLat1) + Math.sin(radLat2),
+			    Math.sqrt((Math.cos(radLat1) + bx) * (Math.cos(radLat1) + bx) + by * by)
+			  );
+			  
+			  const centerLng = toRadians(lng1) + Math.atan2(by, Math.cos(radLat1) + bx);
+			  
+			  return {
+			    lat: toDegrees(centerLat),
+			    lng: toDegrees(centerLng)
+			  };
+			}
+			
+		</script>
+	</body>
+</html>
